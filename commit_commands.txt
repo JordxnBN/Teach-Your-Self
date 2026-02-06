@@ -1,0 +1,17 @@
+# Run these commands in the repository root (CertIVCoach) to create a branch and commit the changes
+
+# 1) Initialize git if needed
+# git init
+
+# 2) Create and switch to feature branch
+git checkout -b feature/quiz-hints-glossary
+
+# 3) Stage all changes
+git add .
+
+# 4) Commit
+git commit -m "Add quiz hint UI, glossary modal, seed contexts, DB migration, CI, and docs"
+
+# 5) (Optional) Add remote and push
+# git remote add origin https://github.com/<yourusername>/CertIVCoach.git
+# git push -u origin feature/quiz-hints-glossary

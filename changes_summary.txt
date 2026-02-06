@@ -1,0 +1,19 @@
+Files changed / added by assistant:
+
+app/server.py (UI: hint box, toggle, glossary modal; API: context field)
+app/db.py (migration: add 'context' column to quiz_questions)
+app/seed.py (seed quiz contexts)
+tools/update_quiz_contexts.py (helper to update DB contexts)
+tools/inspect_db.py (DB inspection helper)
+tests/test_quiz_api.py (minimal API test)
+.github/workflows/ci.yml (CI for lint/test)
+README.md (project README)
+CONTEXT.txt (project context summary)
+.flake8 (flake8 config)
+pyproject.toml (black config)
+requirements.txt (added python-docx)
+PATCH_BUNDLE.txt (bundle marker)
+
+Notes:
+- The repository files have been updated in-place in this workspace.
+- If you want a standard git patch file (.patch), run git commands locally to produce one after committing.

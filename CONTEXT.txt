@@ -1,0 +1,9 @@
+CertIVCoach is an offline desktop coaching and assessment tool for Cert IV IT students. It provides practice quizzes, flashcards, and case study builders for key units. The app helps students review concepts, test knowledge, and prepare for assessments. Features include:
+- Practice quizzes with hints and glossary support
+- Flashcards for spaced repetition
+- Case study builder with DOCX export
+- Student details tracking
+- Data stored locally for privacy
+- Designed for easy use and offline access
+
+For more details, see README.md or ask for help in-app.
