@@ -1,3 +1,7 @@
 [flake8]
 max-line-length = 120
 exclude = __pycache__,build,dist,data,.venv
+# E501: line too long — embedded HTML/JS/CSS and seed data strings make this impractical
+# W291: trailing whitespace in multiline seed strings
+# W503: line break before binary operator (conflicts with Black)
+extend-ignore = E501,W291,W503

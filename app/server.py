@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, Query
+from fastapi import FastAPI, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response, JSONResponse, StreamingResponse
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
@@ -3071,7 +3071,9 @@ def get_settings():
 def set_settings(student_name: str = Form(""), student_number: str = Form("")):
     con = connect()
     con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("student_name", student_name.strip()))
-    con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("student_number", student_number.strip()))
+    con.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("student_number", student_number.strip())
+    )
     con.commit()
     con.close()
     return {"ok": True}
@@ -3080,9 +3082,7 @@ def set_settings(student_name: str = Form(""), student_number: str = Form("")):
 @app.get("/api/units")
 def get_units():
     con = connect()
-    rows = con.execute(
-        "SELECT id, code, title, pinned FROM units ORDER BY pinned DESC, code ASC;"
-    ).fetchall()
+    rows = con.execute("SELECT id, code, title, pinned FROM units ORDER BY pinned DESC, code ASC;").fetchall()
     con.close()
     return {"units": [dict(r) for r in rows]}
 
@@ -3093,18 +3093,18 @@ def create_card(
     event_kind: str = Form(...),
     prompt: str = Form(...),
     answer: str = Form(...),
-    tags: str = Form("")
+    tags: str = Form(""),
 ):
     con = connect()
     cur = con.cursor()
     cur.execute(
         "INSERT INTO cards (unit_id, event_kind, prompt, answer, tags) VALUES (?, ?, ?, ?, ?);",
-        (unit_id, event_kind.strip(), prompt.strip(), answer.strip(), tags.strip())
+        (unit_id, event_kind.strip(), prompt.strip(), answer.strip(), tags.strip()),
     )
     card_id = cur.lastrowid
     cur.execute(
         "INSERT OR REPLACE INTO reviews (card_id, due_date, interval_days, ease) VALUES (?, ?, ?, ?);",
-        (card_id, date.today().isoformat(), 1, 2.5)
+        (card_id, date.today().isoformat(), 1, 2.5),
     )
     con.commit()
     con.close()
@@ -3114,14 +3114,17 @@ def create_card(
 @app.get("/api/review/today")
 def review_today(unit_id: int, event_kind: str):
     con = connect()
-    rows = con.execute("""
+    rows = con.execute(
+        """
         SELECT c.id, c.prompt, c.answer, c.tags, r.due_date, r.interval_days, r.ease
         FROM cards c
         JOIN reviews r ON r.card_id = c.id
         WHERE c.unit_id = ? AND c.event_kind = ? AND r.due_date <= ?
         ORDER BY r.due_date ASC
         LIMIT 30;
-    """, (unit_id, event_kind, date.today().isoformat())).fetchall()
+    """,
+        (unit_id, event_kind, date.today().isoformat()),
+    ).fetchall()
     con.close()
     return {"cards": [dict(r) for r in rows]}
 
@@ -3139,6 +3142,7 @@ def sm2_update(interval_days: int, ease: float, grade: int):
 @app.post("/api/review/grade")
 def grade_card(card_id: int = Form(...), grade: int = Form(...)):
     from datetime import timedelta
+
     con = connect()
     row = con.execute("SELECT interval_days, ease FROM reviews WHERE card_id = ?;", (card_id,)).fetchone()
     if not row:
@@ -3148,19 +3152,27 @@ def grade_card(card_id: int = Form(...), grade: int = Form(...)):
     new_interval, new_ease = sm2_update(int(row["interval_days"]), float(row["ease"]), int(grade))
     new_due = (date.today() + timedelta(days=new_interval)).isoformat()
 
-    con.execute("""
+    con.execute(
+        """
       UPDATE reviews
       SET due_date = ?, interval_days = ?, ease = ?, last_grade = ?, updated_at = CURRENT_TIMESTAMP
       WHERE card_id = ?;
-    """, (new_due, new_interval, new_ease, int(grade), card_id))
+    """,
+        (new_due, new_interval, new_ease, int(grade), card_id),
+    )
     con.commit()
     con.close()
     return {"ok": True, "next_due": new_due}
 
+
 # -------------------------
 # Quiz endpoints (AE1 practice)
 # -------------------------
-def _get_tag_weakness(con, table_attempts: str, table_questions: str, unit_id: int, score_col: str = "correct", window: int = 50) -> dict:
+
+
+def _get_tag_weakness(
+    con, table_attempts: str, table_questions: str, unit_id: int, score_col: str = "correct", window: int = 50
+) -> dict:
     """Compute per-tag weakness scores (0.0=perfect, 1.0=always wrong) from recent attempts."""
     if score_col == "correct":
         query = f"""
@@ -3198,6 +3210,7 @@ def _get_tag_weakness(con, table_attempts: str, table_questions: str, unit_id: i
     for tag, (c, n) in tag_map.items():
         weakness[tag] = 1.0 - (c / n) if n > 0 else 0.5
     return weakness
+
 
 try:
     SYDNEY_TZ = ZoneInfo("Australia/Sydney")
@@ -3285,23 +3298,24 @@ def _weighted_pick(candidates: list, tag_weakness: dict) -> dict:
 def quiz_random(unit_id: int, exclude_ids: Optional[str] = Query(None)):
     con = connect()
 
-    total = con.execute(
-        "SELECT COUNT(*) AS n FROM quiz_questions WHERE unit_id = ?;", (unit_id,)
-    ).fetchone()["n"]
+    total = con.execute("SELECT COUNT(*) AS n FROM quiz_questions WHERE unit_id = ?;", (unit_id,)).fetchone()["n"]
 
     if total == 0:
         con.close()
         return {"question_id": None, "total": 0}
 
     # Fetch all questions with last-seen info, pick from a randomised pool
-    all_qs = con.execute("""
+    all_qs = con.execute(
+        """
         SELECT q.id, q.question, q.choices_json, q.context, q.tags,
                MAX(a.ts) AS last_seen
         FROM quiz_questions q
         LEFT JOIN quiz_attempts a ON a.question_id = q.id AND a.unit_id = q.unit_id
         WHERE q.unit_id = ?
         GROUP BY q.id;
-    """, (unit_id,)).fetchall()
+    """,
+        (unit_id,),
+    ).fetchall()
 
     all_qs = [dict(r) for r in all_qs]
 
@@ -3348,32 +3362,39 @@ def _maybe_create_card(con, unit_id: int, prompt: str, answer: str, tags: str) -
     cur = con.cursor()
     cur.execute(
         "INSERT INTO cards (unit_id, event_kind, prompt, answer, tags) VALUES (?, ?, ?, ?, ?);",
-        (unit_id, "Knowledge", prompt.strip(), answer.strip(), (tags.strip() + ",auto").strip(","))
+        (unit_id, "Knowledge", prompt.strip(), answer.strip(), (tags.strip() + ",auto").strip(",")),
     )
     card_id = cur.lastrowid
     cur.execute(
         "INSERT OR REPLACE INTO reviews (card_id, due_date, interval_days, ease) VALUES (?, ?, ?, ?);",
-        (card_id, date.today().isoformat(), 1, 2.5)
+        (card_id, date.today().isoformat(), 1, 2.5),
     )
     return True
+
 
 @app.post("/api/quiz/answer")
 def quiz_answer(unit_id: int = Form(...), question_id: int = Form(...), chosen_index: int = Form(...)):
     con = connect()
-    q = con.execute("""
+    q = con.execute(
+        """
         SELECT question, answer_index, explanation, tags
         FROM quiz_questions
         WHERE id = ? AND unit_id = ?;
-    """, (question_id, unit_id)).fetchone()
+    """,
+        (question_id, unit_id),
+    ).fetchone()
     if not q:
         con.close()
         return JSONResponse({"ok": False, "error": "Question not found"}, status_code=404)
 
     correct = 1 if int(chosen_index) == int(q["answer_index"]) else 0
-    con.execute("""
+    con.execute(
+        """
         INSERT INTO quiz_attempts (unit_id, question_id, chosen_index, correct, source)
         VALUES (?, ?, ?, ?, ?);
-    """, (unit_id, question_id, int(chosen_index), correct, "mcq_quiz"))
+    """,
+        (unit_id, question_id, int(chosen_index), correct, "mcq_quiz"),
+    )
 
     card_created = False
     if correct == 0:
@@ -3383,32 +3404,40 @@ def quiz_answer(unit_id: int = Form(...), question_id: int = Form(...), chosen_i
     con.commit()
     con.close()
     return {"ok": True, "correct": bool(correct), "explanation": q["explanation"], "card_created": card_created}
+
+
 @app.get("/api/quiz/stats")
 def quiz_stats(unit_id: int, window: int = 20, tag_window: int = 50):
     con = connect()
 
     # Overall stats (last N attempts)
-    rows = con.execute("""
+    rows = con.execute(
+        """
         SELECT correct
         FROM quiz_attempts
         WHERE unit_id = ?
         ORDER BY ts DESC
         LIMIT ?;
-    """, (unit_id, window)).fetchall()
+    """,
+        (unit_id, window),
+    ).fetchall()
 
     total = len(rows)
     correct_n = sum(int(r["correct"]) for r in rows) if rows else 0
     pct = round((correct_n / total) * 100, 1) if total else 0.0
 
     # Tag breakdown (last tag_window attempts)
-    tag_rows = con.execute("""
+    tag_rows = con.execute(
+        """
         SELECT qa.correct, qq.tags
         FROM quiz_attempts qa
         JOIN quiz_questions qq ON qq.id = qa.question_id
         WHERE qa.unit_id = ?
         ORDER BY qa.ts DESC
         LIMIT ?;
-    """, (unit_id, tag_window)).fetchall()
+    """,
+        (unit_id, tag_window),
+    ).fetchall()
 
     tag_map = {}  # tag -> [correct_sum, total]
     for r in tag_rows:
@@ -3424,12 +3453,7 @@ def quiz_stats(unit_id: int, window: int = 20, tag_window: int = 50):
 
     by_tag = []
     for tag, (c, n) in tag_map.items():
-        by_tag.append({
-            "tag": tag,
-            "correct": c,
-            "total": n,
-            "pct": round((c / n) * 100, 1) if n else 0.0
-        })
+        by_tag.append({"tag": tag, "correct": c, "total": n, "pct": round((c / n) * 100, 1) if n else 0.0})
 
     # Sort weakest first, then by sample size desc
     by_tag.sort(key=lambda x: (x["pct"], -x["total"], x["tag"]))
@@ -3440,28 +3464,35 @@ def quiz_stats(unit_id: int, window: int = 20, tag_window: int = 50):
         "total": total,
         "correct": correct_n,
         "pct": pct,
-        "by_tag": by_tag[:10]  # top 10 weakest tags
+        "by_tag": by_tag[:10],  # top 10 weakest tags
     }
+
 
 # -------------------------
 # Progress dashboard
 # -------------------------
+
+
 @app.get("/api/progress")
 def get_progress(unit_id: int, days: int = 14):
     con = connect()
     today = date.today()
 
     # Get daily quiz stats
-    quiz_daily = con.execute("""
+    quiz_daily = con.execute(
+        """
         SELECT DATE(ts) AS d, SUM(correct) AS c, COUNT(*) AS n
         FROM quiz_attempts
         WHERE unit_id = ?
         GROUP BY DATE(ts)
         ORDER BY d DESC;
-    """, (unit_id,)).fetchall()
+    """,
+        (unit_id,),
+    ).fetchall()
 
     # Get daily short answer stats
-    sa_daily = con.execute("""
+    sa_daily = con.execute(
+        """
         SELECT DATE(ts) AS d,
                SUM(CASE WHEN score = 2 THEN 1.0 WHEN score = 1 THEN 0.5 ELSE 0.0 END) AS c,
                COUNT(*) AS n
@@ -3469,7 +3500,9 @@ def get_progress(unit_id: int, days: int = 14):
         WHERE unit_id = ?
         GROUP BY DATE(ts)
         ORDER BY d DESC;
-    """, (unit_id,)).fetchall()
+    """,
+        (unit_id,),
+    ).fetchall()
 
     con.close()
 
@@ -3515,16 +3548,22 @@ def get_progress(unit_id: int, days: int = 14):
         "overall_pct": overall_pct,
     }
 
+
 # -------------------------
 # Gemini API key settings
 # -------------------------
+
+
 @app.post("/api/settings/gemini-key")
 def save_gemini_key(gemini_api_key: str = Form("")):
     con = connect()
-    con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("gemini_api_key", gemini_api_key.strip()))
+    con.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("gemini_api_key", gemini_api_key.strip())
+    )
     con.commit()
     con.close()
     return {"ok": True}
+
 
 @app.get("/api/settings/gemini-key-status")
 def gemini_key_status():
@@ -3532,6 +3571,7 @@ def gemini_key_status():
     key = _get_setting(con, "gemini_api_key")
     con.close()
     return {"has_key": bool(key), "key_length": len(key) if key else 0}
+
 
 @app.get("/api/settings/gemini-key-test")
 def gemini_key_test():
@@ -3546,29 +3586,35 @@ def gemini_key_test():
         return {"ok": False, "error": result["feedback"]}
     return {"ok": True, "message": "API key works!", "test_result": result}
 
+
 # -------------------------
 # Short answer quiz endpoints
 # -------------------------
+
+
 @app.get("/api/short-answer/random")
 def sa_random(unit_id: int):
     con = connect()
 
-    total = con.execute(
-        "SELECT COUNT(*) AS n FROM short_answer_questions WHERE unit_id = ?;", (unit_id,)
-    ).fetchone()["n"]
+    total = con.execute("SELECT COUNT(*) AS n FROM short_answer_questions WHERE unit_id = ?;", (unit_id,)).fetchone()[
+        "n"
+    ]
 
     if total == 0:
         con.close()
         return {"question_id": None, "total": 0}
 
-    all_qs = con.execute("""
+    all_qs = con.execute(
+        """
         SELECT q.id, q.question, q.context, q.tags,
                MAX(a.ts) AS last_seen
         FROM short_answer_questions q
         LEFT JOIN short_answer_attempts a ON a.question_id = q.id AND a.unit_id = q.unit_id
         WHERE q.unit_id = ?
         GROUP BY q.id;
-    """, (unit_id,)).fetchall()
+    """,
+        (unit_id,),
+    ).fetchall()
 
     candidates = [dict(r) for r in all_qs]
     recent_ids = _prune_recent_served(con, unit_id)
@@ -3610,10 +3656,9 @@ Provide brief feedback (1-2 sentences) explaining what was good or missing.
 
 Respond ONLY with valid JSON: {{"score": "correct"|"partial"|"incorrect", "feedback": "..."}}"""
 
-    body = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 256}
-    }).encode("utf-8")
+    body = json.dumps(
+        {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2, "maxOutputTokens": 256}}
+    ).encode("utf-8")
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
 
@@ -3639,10 +3684,7 @@ Respond ONLY with valid JSON: {{"score": "correct"|"partial"|"incorrect", "feedb
                 text = text.strip()
             parsed = json.loads(text)
             score_map = {"correct": 2, "partial": 1, "incorrect": 0}
-            return {
-                "score": score_map.get(parsed.get("score", "incorrect"), 0),
-                "feedback": parsed.get("feedback", "")
-            }
+            return {"score": score_map.get(parsed.get("score", "incorrect"), 0), "feedback": parsed.get("feedback", "")}
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < max_retries - 1:
                 wait = (attempt + 1) * 4  # 4s, 8s
@@ -3654,6 +3696,7 @@ Respond ONLY with valid JSON: {{"score": "correct"|"partial"|"incorrect", "feedb
             return {"score": -1, "feedback": f"HTTP {e.code}: {e.reason}"}
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return {"score": -1, "feedback": str(e)}
 
@@ -3682,10 +3725,9 @@ Explain why the correct answer is right, mention the key concepts that make it c
 
 Respond ONLY with valid JSON: {{"clarification": "..."}}"""
 
-    body = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 512}
-    }).encode("utf-8")
+    body = json.dumps(
+        {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2, "maxOutputTokens": 512}}
+    ).encode("utf-8")
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
 
@@ -3726,7 +3768,9 @@ Respond ONLY with valid JSON: {{"clarification": "..."}}"""
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < max_retries - 1:
                 wait = (attempt + 1) * 4
-                print(f"[Gemini] Clarify rate limited (429), retrying in {wait}s (attempt {attempt+1}/{max_retries})...")
+                print(
+                    f"[Gemini] Clarify rate limited (429), retrying in {wait}s (attempt {attempt+1}/{max_retries})..."
+                )
                 time.sleep(wait)
                 continue
             if e.code == 429:
@@ -3749,10 +3793,9 @@ Key points to cover: {model_answer}
 
 Respond in plain text (no JSON, no markdown formatting)."""
 
-    body = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 512}
-    }).encode("utf-8")
+    body = json.dumps(
+        {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.4, "maxOutputTokens": 512}}
+    ).encode("utf-8")
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
 
@@ -3777,14 +3820,18 @@ Respond in plain text (no JSON, no markdown formatting)."""
             return ""
     return ""
 
+
 @app.post("/api/short-answer/teach")
 def sa_teach(unit_id: int = Form(...), question_id: int = Form(...)):
     con = connect()
-    q = con.execute("""
+    q = con.execute(
+        """
         SELECT question, model_answer, explanation, tags
         FROM short_answer_questions
         WHERE id = ? AND unit_id = ?;
-    """, (question_id, unit_id)).fetchone()
+    """,
+        (question_id, unit_id),
+    ).fetchone()
     if not q:
         con.close()
         return JSONResponse({"ok": False, "error": "Question not found"}, status_code=404)
@@ -3800,10 +3847,13 @@ def sa_teach(unit_id: int = Form(...), question_id: int = Form(...)):
         teaching = q["explanation"]
 
     # Record attempt as score=0
-    con.execute("""
+    con.execute(
+        """
         INSERT INTO short_answer_attempts (unit_id, question_id, student_answer, score, ai_feedback, source)
         VALUES (?, ?, ?, ?, ?, ?);
-    """, (unit_id, question_id, "", 0, "Used Teach Me", "short_answer"))
+    """,
+        (unit_id, question_id, "", 0, "Used Teach Me", "short_answer"),
+    )
 
     card_created = _maybe_create_card(con, unit_id, q["question"], q["model_answer"], q["tags"] or "")
     _record_daily_progress(con, unit_id, sa_correct=0, sa_total=1)
@@ -3818,14 +3868,18 @@ def sa_teach(unit_id: int = Form(...), question_id: int = Form(...)):
         "card_created": card_created,
     }
 
+
 @app.post("/api/short-answer/check")
 def sa_check(unit_id: int = Form(...), question_id: int = Form(...), student_answer: str = Form(...)):
     con = connect()
-    q = con.execute("""
+    q = con.execute(
+        """
         SELECT question, model_answer, explanation
         FROM short_answer_questions
         WHERE id = ? AND unit_id = ?;
-    """, (question_id, unit_id)).fetchone()
+    """,
+        (question_id, unit_id),
+    ).fetchone()
     if not q:
         con.close()
         return JSONResponse({"ok": False, "error": "Question not found"}, status_code=404)
@@ -3847,22 +3901,22 @@ def sa_check(unit_id: int = Form(...), question_id: int = Form(...), student_ans
     if result["score"] == -1:
         # AI call failed — fall back to self-grade
         con.close()
-        return {
-            "ok": True,
-            "mode": "self_grade",
-            "model_answer": q["model_answer"],
-            "ai_error": result["feedback"]
-        }
+        return {"ok": True, "mode": "self_grade", "model_answer": q["model_answer"], "ai_error": result["feedback"]}
 
-    con.execute("""
+    con.execute(
+        """
         INSERT INTO short_answer_attempts (unit_id, question_id, student_answer, score, ai_feedback, source)
         VALUES (?, ?, ?, ?, ?, ?);
-    """, (unit_id, question_id, student_answer.strip(), result["score"], result["feedback"], "short_answer"))
+    """,
+        (unit_id, question_id, student_answer.strip(), result["score"], result["feedback"], "short_answer"),
+    )
 
     card_created = False
     if result["score"] == 0:
         tags_row = con.execute("SELECT tags FROM short_answer_questions WHERE id = ?;", (question_id,)).fetchone()
-        card_created = _maybe_create_card(con, unit_id, q["question"], q["model_answer"], (tags_row["tags"] if tags_row else "") or "")
+        card_created = _maybe_create_card(
+            con, unit_id, q["question"], q["model_answer"], (tags_row["tags"] if tags_row else "") or ""
+        )
     _record_daily_progress(con, unit_id, sa_correct=1 if result["score"] == 2 else 0, sa_total=1)
 
     con.commit()
@@ -3877,18 +3931,26 @@ def sa_check(unit_id: int = Form(...), question_id: int = Form(...), student_ans
         "card_created": card_created,
     }
 
+
 @app.post("/api/short-answer/self-grade")
-def sa_self_grade(unit_id: int = Form(...), question_id: int = Form(...), score: int = Form(...), student_answer: str = Form("")):
+def sa_self_grade(
+    unit_id: int = Form(...), question_id: int = Form(...), score: int = Form(...), student_answer: str = Form("")
+):
     con = connect()
     actual_score = max(0, min(2, score))
-    con.execute("""
+    con.execute(
+        """
         INSERT INTO short_answer_attempts (unit_id, question_id, student_answer, score, ai_feedback, source)
         VALUES (?, ?, ?, ?, ?, ?);
-    """, (unit_id, question_id, student_answer.strip(), actual_score, "Self-graded", "short_answer"))
+    """,
+        (unit_id, question_id, student_answer.strip(), actual_score, "Self-graded", "short_answer"),
+    )
 
     card_created = False
     if actual_score == 0:
-        q = con.execute("SELECT question, model_answer, tags FROM short_answer_questions WHERE id = ?;", (question_id,)).fetchone()
+        q = con.execute(
+            "SELECT question, model_answer, tags FROM short_answer_questions WHERE id = ?;", (question_id,)
+        ).fetchone()
         if q:
             card_created = _maybe_create_card(con, unit_id, q["question"], q["model_answer"], q["tags"] or "")
     _record_daily_progress(con, unit_id, sa_correct=1 if actual_score == 2 else 0, sa_total=1)
@@ -3897,17 +3959,21 @@ def sa_self_grade(unit_id: int = Form(...), question_id: int = Form(...), score:
     con.close()
     return {"ok": True, "card_created": card_created}
 
+
 @app.get("/api/short-answer/stats")
 def sa_stats(unit_id: int, window: int = 20, tag_window: int = 50):
     con = connect()
 
-    rows = con.execute("""
+    rows = con.execute(
+        """
         SELECT score
         FROM short_answer_attempts
         WHERE unit_id = ?
         ORDER BY ts DESC
         LIMIT ?;
-    """, (unit_id, window)).fetchall()
+    """,
+        (unit_id, window),
+    ).fetchall()
 
     total = len(rows)
     # Score 2 = correct, score 1 = partial (count as 0.5), score 0 = incorrect
@@ -3915,14 +3981,17 @@ def sa_stats(unit_id: int, window: int = 20, tag_window: int = 50):
     partial_n = sum(1 for r in rows if int(r["score"]) == 1)
     pct = round(((correct_n + partial_n * 0.5) / total) * 100, 1) if total else 0.0
 
-    tag_rows = con.execute("""
+    tag_rows = con.execute(
+        """
         SELECT sa.score, sq.tags
         FROM short_answer_attempts sa
         JOIN short_answer_questions sq ON sq.id = sa.question_id
         WHERE sa.unit_id = ?
         ORDER BY sa.ts DESC
         LIMIT ?;
-    """, (unit_id, tag_window)).fetchall()
+    """,
+        (unit_id, tag_window),
+    ).fetchall()
 
     tag_map = {}
     for r in tag_rows:
@@ -3938,34 +4007,26 @@ def sa_stats(unit_id: int, window: int = 20, tag_window: int = 50):
 
     by_tag = []
     for tag, (c, n) in tag_map.items():
-        by_tag.append({
-            "tag": tag,
-            "correct": c,
-            "total": n,
-            "pct": round((c / n) * 100, 1) if n else 0.0
-        })
+        by_tag.append({"tag": tag, "correct": c, "total": n, "pct": round((c / n) * 100, 1) if n else 0.0})
 
     by_tag.sort(key=lambda x: (x["pct"], -x["total"], x["tag"]))
     con.close()
 
-    return {
-        "window": window,
-        "total": total,
-        "correct": correct_n,
-        "pct": pct,
-        "by_tag": by_tag[:10]
-    }
+    return {"window": window, "total": total, "correct": correct_n, "pct": pct, "by_tag": by_tag[:10]}
 
 
 # -------------------------
 # Mistake review endpoint
 # -------------------------
+
+
 @app.get("/api/mistakes")
 def mistakes(unit_id: int):
     """Return questions the student has answered incorrectly (MCQ + short answer)."""
     con = connect()
 
-    quiz_rows = con.execute("""
+    quiz_rows = con.execute(
+        """
         SELECT
             a.unit_id,
             a.question_id,
@@ -3987,7 +4048,9 @@ def mistakes(unit_id: int):
         JOIN quiz_questions q ON q.id = a.question_id AND q.unit_id = a.unit_id
         WHERE a.unit_id = ? AND a.correct = 0
         ORDER BY a.ts DESC;
-    """, (unit_id,)).fetchall()
+    """,
+        (unit_id,),
+    ).fetchall()
 
     quiz_map = {}
     for r in quiz_rows:
@@ -4008,7 +4071,8 @@ def mistakes(unit_id: int):
             }
         quiz_map[qid]["wrong_count"] += 1
 
-    sa_rows = con.execute("""
+    sa_rows = con.execute(
+        """
         SELECT
             a.unit_id,
             a.question_id,
@@ -4028,7 +4092,9 @@ def mistakes(unit_id: int):
         JOIN short_answer_questions q ON q.id = a.question_id AND q.unit_id = a.unit_id
         WHERE a.unit_id = ? AND a.score = 0
         ORDER BY a.ts DESC;
-    """, (unit_id,)).fetchall()
+    """,
+        (unit_id,),
+    ).fetchall()
 
     sa_map = {}
     for r in sa_rows:
@@ -4182,14 +4248,18 @@ def _compute_exam_summary_and_persist(exam_id: str):
                 is_correct = chosen_idx is not None and chosen_idx == correct_idx
                 if is_correct:
                     correct += 1
-                review.append({
-                    "kind": "mcq",
-                    "question_id": q["id"],
-                    "question": q["question"],
-                    "your_answer": choices[chosen_idx] if chosen_idx is not None and 0 <= chosen_idx < len(choices) else "",
-                    "correct_answer": choices[correct_idx] if 0 <= correct_idx < len(choices) else "",
-                    "correct": is_correct,
-                })
+                review.append(
+                    {
+                        "kind": "mcq",
+                        "question_id": q["id"],
+                        "question": q["question"],
+                        "your_answer": (
+                            choices[chosen_idx] if chosen_idx is not None and 0 <= chosen_idx < len(choices) else ""
+                        ),
+                        "correct_answer": choices[correct_idx] if 0 <= correct_idx < len(choices) else "",
+                        "correct": is_correct,
+                    }
+                )
                 con.execute(
                     "INSERT INTO quiz_attempts (unit_id, question_id, chosen_index, correct, source) VALUES (?, ?, ?, ?, ?);",
                     (unit_id, q["id"], chosen_idx if chosen_idx is not None else -1, 1 if is_correct else 0, "exam"),
@@ -4212,15 +4282,17 @@ def _compute_exam_summary_and_persist(exam_id: str):
                 if score == 2:
                     correct += 1
                 is_correct = score == 2
-                review.append({
-                    "kind": "sa",
-                    "question_id": q["id"],
-                    "question": q["question"],
-                    "your_answer": your or "",
-                    "correct_answer": row["model_answer"],
-                    "correct": is_correct,
-                    "ai_feedback": feedback,
-                })
+                review.append(
+                    {
+                        "kind": "sa",
+                        "question_id": q["id"],
+                        "question": q["question"],
+                        "your_answer": your or "",
+                        "correct_answer": row["model_answer"],
+                        "correct": is_correct,
+                        "ai_feedback": feedback,
+                    }
+                )
                 con.execute(
                     "INSERT INTO short_answer_attempts (unit_id, question_id, student_answer, score, ai_feedback, source) VALUES (?, ?, ?, ?, ?, ?);",
                     (unit_id, q["id"], student_ans, score, feedback, "exam"),
@@ -4302,7 +4374,9 @@ def exam_challenge(
             answer_idx = int(row["answer_index"])
         except (ValueError, TypeError):
             answer_idx = None
-        correct_answer = choices[answer_idx] if answer_idx is not None and 0 <= answer_idx < len(choices) else row["explanation"]
+        correct_answer = (
+            choices[answer_idx] if answer_idx is not None and 0 <= answer_idx < len(choices) else row["explanation"]
+        )
         try:
             candidate_idx = int(user_answer)
             user_answer_text = choices[candidate_idx] if 0 <= candidate_idx < len(choices) else user_answer
@@ -4323,7 +4397,9 @@ def exam_challenge(
         explanation = row["explanation"] or ""
         question_text = row["question"]
 
-    result = _call_gemini_clarify(api_key, question_text, correct_answer, user_answer_text, user_challenge.strip(), explanation)
+    result = _call_gemini_clarify(
+        api_key, question_text, correct_answer, user_answer_text, user_challenge.strip(), explanation
+    )
     con.close()
     clarification = result.get("clarification", "").strip()
     if clarification:
@@ -4334,6 +4410,8 @@ def exam_challenge(
 # -------------------------
 # Explain-it-back endpoints
 # -------------------------
+
+
 @app.get("/api/explain/random")
 def explain_random(unit_id: int):
     con = connect()
@@ -4389,10 +4467,12 @@ Rate the student explanation from 1 to 5 for:
 
 Respond ONLY with valid JSON: {{"score": 1-5, "feedback": "brief comments on what was good and what was missing"}}"""
 
-        body = json.dumps({
-            "contents": [{"parts": [{"text": rubric}]}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 256}
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "contents": [{"parts": [{"text": rubric}]}],
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 256},
+            }
+        ).encode("utf-8")
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
         try:
@@ -4441,15 +4521,20 @@ Respond ONLY with valid JSON: {{"score": 1-5, "feedback": "brief comments on wha
 # -------------------------
 # AE2 endpoints (Case Study builder)
 # -------------------------
+
+
 @app.get("/api/ae2/items")
 def ae2_items(unit_id: int):
     con = connect()
-    rows = con.execute("""
+    rows = con.execute(
+        """
         SELECT code, title, section, order_index
         FROM ae2_items
         WHERE unit_id = ?
         ORDER BY order_index ASC;
-    """, (unit_id,)).fetchall()
+    """,
+        (unit_id,),
+    ).fetchall()
     con.close()
     return {"items": [dict(r) for r in rows]}
 
@@ -4457,17 +4542,23 @@ def ae2_items(unit_id: int):
 @app.get("/api/ae2/item")
 def ae2_item(unit_id: int, item_code: str):
     con = connect()
-    item = con.execute("""
+    item = con.execute(
+        """
         SELECT code, title, section, template_md, word_guidance
         FROM ae2_items
         WHERE unit_id = ? AND code = ?;
-    """, (unit_id, item_code)).fetchone()
+    """,
+        (unit_id, item_code),
+    ).fetchone()
 
-    resp = con.execute("""
+    resp = con.execute(
+        """
         SELECT content_md
         FROM ae2_responses
         WHERE unit_id = ? AND item_code = ?;
-    """, (unit_id, item_code)).fetchone()
+    """,
+        (unit_id, item_code),
+    ).fetchone()
 
     con.close()
     if not item:
@@ -4479,17 +4570,20 @@ def ae2_item(unit_id: int, item_code: str):
         "section": item["section"],
         "template_md": item["template_md"],
         "word_guidance": item["word_guidance"],
-        "content_md": resp["content_md"] if resp else ""
+        "content_md": resp["content_md"] if resp else "",
     }
 
 
 @app.post("/api/ae2/response/save")
 def ae2_save(unit_id: int = Form(...), item_code: str = Form(...), content_md: str = Form(...)):
     con = connect()
-    con.execute("""
+    con.execute(
+        """
         INSERT OR REPLACE INTO ae2_responses (unit_id, item_code, content_md, updated_at)
         VALUES (?, ?, ?, CURRENT_TIMESTAMP);
-    """, (unit_id, item_code.strip(), content_md))
+    """,
+        (unit_id, item_code.strip(), content_md),
+    )
     con.commit()
     con.close()
     return {"ok": True}
@@ -4562,17 +4656,23 @@ def _md_to_docx(document: Document, md: str):
 @app.get("/api/ae2/export_docx")
 def ae2_export_docx(unit_id: int, item_code: str):
     con = connect()
-    item = con.execute("""
+    item = con.execute(
+        """
         SELECT title, template_md
         FROM ae2_items
         WHERE unit_id = ? AND code = ?;
-    """, (unit_id, item_code)).fetchone()
+    """,
+        (unit_id, item_code),
+    ).fetchone()
 
-    resp = con.execute("""
+    resp = con.execute(
+        """
         SELECT content_md
         FROM ae2_responses
         WHERE unit_id = ? AND item_code = ?;
-    """, (unit_id, item_code)).fetchone()
+    """,
+        (unit_id, item_code),
+    ).fetchone()
 
     if not item:
         con.close()
@@ -4612,7 +4712,5 @@ def ae2_export_docx(unit_id: int, item_code: str):
     # Streaming download with proper content-disposition [web:341][web:350]
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return StreamingResponse(
-        bio,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers=headers
+        bio, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=headers
     )

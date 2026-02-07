@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import sys
 
+
 def get_app_dir() -> Path:
     # If running as a PyInstaller EXE
     if getattr(sys, "frozen", False):
@@ -11,19 +12,23 @@ def get_app_dir() -> Path:
     # If running from source (python desktop.py)
     return Path(__file__).resolve().parent.parent / "data"
 
+
 APP_DIR = get_app_dir()
 DB_PATH = APP_DIR / "coach.db"
 BACKUP_DIR = APP_DIR / "backups"
 
+
 def _column_exists(cur, table, column):
     cur.execute(f"PRAGMA table_info({table});")
     return any(r[1] == column for r in cur.fetchall())
+
 
 def _safe_alter(cur, ddl, description):
     try:
         cur.execute(ddl)
     except sqlite3.OperationalError as exc:
         print(f"Skipped migration ({description}): {exc}")
+
 
 def backup_database():
     APP_DIR.mkdir(parents=True, exist_ok=True)
@@ -44,6 +49,7 @@ def connect():
     con.execute("PRAGMA journal_mode = WAL;")
     con.execute("PRAGMA synchronous = NORMAL;")
     return con
+
 
 def migrate():
     backup_path = backup_database()
