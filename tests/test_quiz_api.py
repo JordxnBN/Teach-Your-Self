@@ -1,9 +1,12 @@
-import requests
+from fastapi.testclient import TestClient
 
-BASE_URL = "http://127.0.0.1:8799"
+from app.server import app
+
+client = TestClient(app)
+
 
 def test_quiz_random():
-    r = requests.get(f"{BASE_URL}/api/quiz/random?unit_id=1")
+    r = client.get("/api/quiz/random?unit_id=1")
     assert r.status_code == 200
     data = r.json()
     assert "question_id" in data
