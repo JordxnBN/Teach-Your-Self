@@ -28,6 +28,7 @@ if __name__ == "__main__":
         min_size=(900, 640),
         resizable=True,
         background_color="#030711",
+        text_select=True,
     )
     # icon supported on GTK/QT; on Windows the exe icon is set via PyInstaller
     try:

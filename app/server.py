@@ -402,6 +402,7 @@ body {
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
   line-height: 1.5;
+  user-select: text;
 }
 
 /* ── App Shell ── */
@@ -1505,6 +1506,23 @@ let mistakeFilterTag = localStorage.getItem('mistakeFilterTag') || '';
 let currentExam = null;
 let currentExplainTopic = null;
 
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function getShuffledIndices(questionObj) {
+  if (!questionObj || !Array.isArray(questionObj.choices)) return [];
+  const count = questionObj.choices.length;
+  if (!questionObj.shuffled_indices || questionObj.shuffled_indices.length !== count) {
+    questionObj.shuffled_indices = shuffleArray(Array.from({ length: count }, (_, idx) => idx));
+  }
+  return questionObj.shuffled_indices;
+}
+
 // Force default: hints hidden unless user clicks Show hint
 if (!localStorage.getItem('quizShowContext')) {
   localStorage.setItem('quizShowContext', 'false');
@@ -1847,13 +1865,15 @@ function renderQuizQuestion(data) {
 
   const box = document.getElementById('quizChoices');
   box.innerHTML = '';
-  currentQuiz.choices.forEach(function(c, idx) {
-    const id = 'q_' + idx;
+  const indices = getShuffledIndices(currentQuiz);
+  indices.forEach(function(choiceIdx, displayIdx) {
+    const choiceText = currentQuiz.choices[choiceIdx];
+    const id = 'q_' + displayIdx;
     const row = document.createElement('div');
     row.className = 'quiz-choice-row';
     row.innerHTML = '<label class="quiz-choice">' +
-      '<input type="radio" name="quizChoice" value="' + idx + '" id="' + id + '">' +
-      '<span class="quiz-choice-text">' + renderContext(c) + '</span>' +
+      '<input type="radio" name="quizChoice" value="' + choiceIdx + '" id="' + id + '">' +
+      '<span class="quiz-choice-text">' + renderContext(choiceText) + '</span>' +
       '</label>';
     box.appendChild(row);
   });
@@ -1925,6 +1945,9 @@ function toggleQuizContext() {
 
 async function submitQuiz() {
   if (!currentQuiz) return;
+  if (lastQuizSubmitted) {
+    return startQuiz();
+  }
   const chosen = document.querySelector('input[name="quizChoice"]:checked');
   if (!chosen) return alert('Pick an answer first.');
 
@@ -2127,10 +2150,12 @@ function renderExamQuestion() {
   body += `<div class="card exam-card"><div class="question-text">${renderContext(q.question)}</div>`;
   if (q.kind === 'mcq') {
     body += '<div id="examChoices">';
-    q.choices.forEach((c, i) => {
+    const indices = getShuffledIndices(q);
+    indices.forEach((choiceIdx) => {
+      const choiceText = q.choices[choiceIdx];
       body += '<div class="quiz-choice-row"><label class="quiz-choice">' +
-        '<input type="radio" name="examChoice" value="' + i + '">' +
-        '<span class="quiz-choice-text">' + renderContext(c) + '</span>' +
+        '<input type="radio" name="examChoice" value="' + choiceIdx + '">' +
+        '<span class="quiz-choice-text">' + renderContext(choiceText) + '</span>' +
         '</label></div>';
     });
     body += '</div>';
@@ -2663,7 +2688,7 @@ function toggleSAContext() {
 }
 
 async function teachMeSA() {
-  if (!currentSA) return;
+  if (!currentSA || lastSASubmitted) return;
   if (!currentUnitId) return alert('Select a unit first.');
 
   const feedbackEl = document.getElementById('saFeedback');
@@ -2703,6 +2728,9 @@ async function teachMeSA() {
 
 async function submitShortAnswer() {
   if (!currentSA) return;
+  if (lastSASubmitted) {
+    return startShortAnswer();
+  }
   const answer = document.getElementById('saAnswer').value.trim();
   if (!answer) return alert('Type an answer first.');
 
@@ -3008,22 +3036,27 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 """
 
+
 @app.on_event("startup")
 def startup():
     migrate()
     seed_all()
 
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return INDEX_HTML
+
 
 @app.get("/styles.css")
 def styles():
     return Response(content=STYLES_CSS, media_type="text/css")
 
+
 @app.get("/app.js")
 def appjs():
     return Response(content=APP_JS, media_type="application/javascript")
+
 
 @app.get("/api/settings")
 def get_settings():
@@ -3032,6 +3065,7 @@ def get_settings():
     con.close()
     kv = {r["key"]: r["value"] for r in rows}
     return {"student_name": kv.get("student_name", ""), "student_number": kv.get("student_number", "")}
+
 
 @app.post("/api/settings")
 def set_settings(student_name: str = Form(""), student_number: str = Form("")):
@@ -3042,6 +3076,7 @@ def set_settings(student_name: str = Form(""), student_number: str = Form("")):
     con.close()
     return {"ok": True}
 
+
 @app.get("/api/units")
 def get_units():
     con = connect()
@@ -3050,6 +3085,7 @@ def get_units():
     ).fetchall()
     con.close()
     return {"units": [dict(r) for r in rows]}
+
 
 @app.post("/api/cards")
 def create_card(
@@ -3074,6 +3110,7 @@ def create_card(
     con.close()
     return {"ok": True, "card_id": card_id}
 
+
 @app.get("/api/review/today")
 def review_today(unit_id: int, event_kind: str):
     con = connect()
@@ -3088,6 +3125,7 @@ def review_today(unit_id: int, event_kind: str):
     con.close()
     return {"cards": [dict(r) for r in rows]}
 
+
 def sm2_update(interval_days: int, ease: float, grade: int):
     if grade == 0:
         return 1, max(1.3, ease - 0.2)
@@ -3096,6 +3134,7 @@ def sm2_update(interval_days: int, ease: float, grade: int):
     if grade == 2:
         return max(1, int(interval_days * ease)), ease
     return max(1, int(interval_days * (ease + 0.3))), min(3.0, ease + 0.05)
+
 
 @app.post("/api/review/grade")
 def grade_card(card_id: int = Form(...), grade: int = Form(...)):
@@ -3241,6 +3280,7 @@ def _weighted_pick(candidates: list, tag_weakness: dict) -> dict:
 
     return random.choices(candidates, weights=weights, k=1)[0]
 
+
 @app.get("/api/quiz/random")
 def quiz_random(unit_id: int, exclude_ids: Optional[str] = Query(None)):
     con = connect()
@@ -3296,6 +3336,7 @@ def quiz_random(unit_id: int, exclude_ids: Optional[str] = Query(None)):
         "context": r["context"] or "",
         "total": total,
     }
+
 
 def _maybe_create_card(con, unit_id: int, prompt: str, answer: str, tags: str) -> bool:
     """Create a flashcard from a mistake if one doesn't already exist. Returns True if created."""
@@ -3551,6 +3592,7 @@ def sa_random(unit_id: int):
         "total": total,
     }
 
+
 def _call_gemini(api_key: str, question: str, model_answer: str, student_answer: str) -> dict:
     """Call Gemini API to grade a short answer. Retries on 429 rate-limit."""
     prompt = f"""You are grading a Cert IV networking student's short answer.
@@ -3694,6 +3736,7 @@ Respond ONLY with valid JSON: {{"clarification": "..."}}"""
             return {"clarification": "", "error": str(e)}
 
     return {"clarification": "", "error": "Failed after retries."}
+
 
 def _call_gemini_teach(api_key: str, question: str, model_answer: str) -> str:
     """Call Gemini to generate a teaching explanation. Returns plain text."""
@@ -4410,6 +4453,7 @@ def ae2_items(unit_id: int):
     con.close()
     return {"items": [dict(r) for r in rows]}
 
+
 @app.get("/api/ae2/item")
 def ae2_item(unit_id: int, item_code: str):
     con = connect()
@@ -4438,6 +4482,7 @@ def ae2_item(unit_id: int, item_code: str):
         "content_md": resp["content_md"] if resp else ""
     }
 
+
 @app.post("/api/ae2/response/save")
 def ae2_save(unit_id: int = Form(...), item_code: str = Form(...), content_md: str = Form(...)):
     con = connect()
@@ -4449,9 +4494,11 @@ def ae2_save(unit_id: int = Form(...), item_code: str = Form(...), content_md: s
     con.close()
     return {"ok": True}
 
+
 def _get_setting(con, key: str) -> str:
     r = con.execute("SELECT value FROM settings WHERE key = ?;", (key,)).fetchone()
     return r["value"] if r else ""
+
 
 def _md_to_docx(document: Document, md: str):
     lines = md.replace("\r\n", "\n").split("\n")
@@ -4508,8 +4555,9 @@ def _md_to_docx(document: Document, md: str):
             continue
 
         # Paragraph (default)
-        document.add_paragraph(line)
-        i += 1
+    document.add_paragraph(line)
+    i += 1
+
 
 @app.get("/api/ae2/export_docx")
 def ae2_export_docx(unit_id: int, item_code: str):

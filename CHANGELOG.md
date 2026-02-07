@@ -27,6 +27,22 @@
 
 ## Change Log (newest first)
 
+### 2026-02-07 — MCQ Shuffling, Double Submission Fix, UI Selection & PEP 8 Fixes
+
+- **MCQ Answer Shuffling:** Implemented choice randomization in `APP_JS` to prevent students from memorizing answer positions. Correct indices are maintained for accurate scoring.
+- **Double Submission Prevention:** Updated `submitQuiz` and `submitShortAnswer` to automatically advance to the next question if an answer has already been submitted, preventing duplicate tracking.
+- **UI Enhancements:** Enabled text selection and standard context menus (autocorrect, etc.) in the `pywebview` window by setting `text_select=True` in `StudyCoach.py` and updating CSS.
+- **PEP 8 Compliance:** Fixed multiple E302 style errors in `app/server.py` by ensuring two blank lines separate all top-level functions and decorators.
+- **Learning Design (Plan):** Drafted plans for interleaved reviews, confidence-based transitions, and visual progress tracking.
+
+### 2026-02-07 — Desktop polish, persistence, packaging, GitHub
+
+- **Local UI persistence & polish:** `loadUnits()` now returns a promise so the saved `currentUnitId`, selected page/tab, flashcard mode, and mistake filter are restored from `localStorage` after units finish loading. `showPage`, `selectUnit`, `setMode`, and `setMistakeFilter` write back to `localStorage`, and new helpers like `toggleButtonLoading` plus clearer Gemini status messaging make the quiz/exam/clarify flows feel responsive.
+- **Exam/quiz improvements:** Added “Ask about this question” buttons next to MCQ feedback, ensured challenge/clarify areas are reset per question, displayed Gemini clarification results with Markdown rendering, and guarded exam salt calls with stored answers so only answered questions hit Gemini between submissions.
+- **Stronger SQLite persistence:** Database connections now use WAL mode with `PRAGMA synchronous = NORMAL`, migrations run through `_safe_alter()` wrappers, and every migration run performs a timestamped backup (`data/backups/`) before applying structural changes so old data can be restored safely.
+- **Desktop/packaging overhaul:** Renamed `desktop.py` to `StudyCoach.py`, launched the app with a branded pywebview window (custom title, background, icon fallback), rewrote the PyInstaller spec/build script to output `dist/studycoachapp.exe`, and added `tools/create_icon.py` plus `build-studycoach.bat` to regenerate assets and rebuild easily. The new `.gitignore`/Black/Flake configs keep `build/`, `dist/`, and `data/` out of Git.
+- **Project cleanup & GitHub:** Assets, docs (CONTEXT -> docs/CONTEXT.md, commit_commands -> docs/git-workflow.md), and helper scripts now live under `assets/`, `docs/`, and `tools/`. Redundant files and stale PyInstaller artifacts were removed, and the repository was pushed to `https://github.com/JordxnBN/Teach-Your-Self` with the updated history.
+
 ### 2026-02-08 — Exam Mode Persistence & Mistakes Tracking
 
 - **Exam Mode Persistence:** Exam attempts (both MCQ and short answer) are now persisted to the database when the exam finishes, so they appear in the Mistakes tab and contribute to progress tracking.
