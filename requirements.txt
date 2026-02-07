@@ -3,3 +3,4 @@ uvicorn
 pywebview
 python-multipart
 python-docx
+Pillow

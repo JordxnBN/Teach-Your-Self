@@ -4,4 +4,6 @@ exclude = '''
 /__pycache__/
 /build/
 /dist/
+/data/
+/.venv/
 '''
